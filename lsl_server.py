@@ -165,6 +165,12 @@ def run_demo_with_lsl():
     screen_width, screen_height = get_screen_size()
     if screen_width == 0 or screen_height == 0:
         raise ValueError("Could not get valid screen dimensions. Cannot normalize coordinates.")
+    
+    print(f"Screen resolution detected: {screen_width}x{screen_height}")
+    
+    # Validate screen dimensions are reasonable (not corrupted)
+    if screen_width < 100 or screen_width > 10000 or screen_height < 100 or screen_height > 10000:
+        raise ValueError(f"Screen dimensions ({screen_width}x{screen_height}) appear invalid. Please check display settings.")
 
     if filter_method == "kalman":
         kalman = make_kalman()
@@ -235,9 +241,15 @@ def run_demo_with_lsl():
                 key_indices = [0,33,263,61,291,199,1,13,14,17]
                 for i, idx in enumerate(key_indices):
                     lm = face_landmarks.landmark[idx]
-                    facemesh_sample[i*3+0] = lm.x  # normalized [0,1]
-                    facemesh_sample[i*3+1] = lm.y  # normalized [0,1]
-                    facemesh_sample[i*3+2] = lm.z  # z is relative, in meters
+                    # Validate landmark values before using them
+                    if not (np.isfinite(lm.x) and np.isfinite(lm.y) and np.isfinite(lm.z)):
+                        continue  # Skip invalid landmarks
+                    if abs(lm.x) > 10.0 or abs(lm.y) > 10.0 or abs(lm.z) > 10.0:
+                        continue  # Skip extreme values
+                    
+                    facemesh_sample[i*3+0] = max(0.0, min(1.0, lm.x))  # clamp to [0,1]
+                    facemesh_sample[i*3+1] = max(0.0, min(1.0, lm.y))  # clamp to [0,1]
+                    facemesh_sample[i*3+2] = max(-1.0, min(1.0, lm.z))  # clamp z to reasonable range
 
             # --- Gaze estimation and LSL sample preparation ---
             # Case 1: Blink detected -> send (0, 0, 1)
@@ -250,17 +262,46 @@ def run_demo_with_lsl():
             elif features is not None:
                 gaze_point = gaze_estimator.predict(np.array([features]))[0]
                 x, y = map(int, gaze_point)
-                x_pred, y_pred = smoother.step(x, y)
-                contours = smoother.debug.get("contours", [])
-                cursor_alpha = min(cursor_alpha + cursor_step, 1.0)
+                
+                # Validate raw predictions before smoothing
+                if not (np.isfinite(x) and np.isfinite(y)):
+                    print(f"\nWARNING: Gaze estimator returned non-finite values: ({x}, {y}). Skipping.")
+                    lsl_sample = None
+                    x_pred = y_pred = None
+                    contours = []
+                    cursor_alpha = max(cursor_alpha - cursor_step, 0.0)
+                elif abs(x) > 100000 or abs(y) > 100000:
+                    print(f"\nWARNING: Gaze estimator returned extreme values: ({x}, {y}). Skipping.")
+                    lsl_sample = None
+                    x_pred = y_pred = None
+                    contours = []
+                    cursor_alpha = max(cursor_alpha - cursor_step, 0.0)
+                else:
+                    x_pred, y_pred = smoother.step(x, y)
+                    contours = smoother.debug.get("contours", [])
+                    cursor_alpha = min(cursor_alpha + cursor_step, 1.0)
 
-                # Normalize gaze coordinates to [0, 1]
-                lsl_gaze_x = x_pred / screen_width
-                lsl_gaze_y = y_pred / screen_height
-                # Clamp to valid range
-                lsl_gaze_x = max(0.0, min(1.0, lsl_gaze_x))
-                lsl_gaze_y = max(0.0, min(1.0, lsl_gaze_y))
-                lsl_sample = [lsl_gaze_x, lsl_gaze_y, 0.0]
+                    # Normalize gaze coordinates to [0, 1]
+                    # Add safety checks for division by zero and invalid values
+                    if screen_width <= 0 or screen_height <= 0:
+                        print(f"\nWARNING: Invalid screen dimensions ({screen_width}x{screen_height}). Skipping frame.")
+                        lsl_sample = None
+                    elif x_pred is None or y_pred is None or not np.isfinite(x_pred) or not np.isfinite(y_pred):
+                        print(f"\nWARNING: Invalid predicted gaze ({x_pred}, {y_pred}). Skipping frame.")
+                        lsl_sample = None
+                    else:
+                        lsl_gaze_x = x_pred / screen_width
+                        lsl_gaze_y = y_pred / screen_height
+                        
+                        # Additional safety check after division
+                        if not np.isfinite(lsl_gaze_x) or not np.isfinite(lsl_gaze_y):
+                            print(f"\nWARNING: Division resulted in invalid values ({lsl_gaze_x}, {lsl_gaze_y}). Skipping frame.")
+                            lsl_sample = None
+                        else:
+                            # Clamp to valid range
+                            lsl_gaze_x = max(0.0, min(1.0, lsl_gaze_x))
+                            lsl_gaze_y = max(0.0, min(1.0, lsl_gaze_y))
+                            lsl_sample = [lsl_gaze_x, lsl_gaze_y, 0.0]
             # Case 3: Invalid data (features is None and no blink) -> don't send
             else:
                 lsl_sample = None
@@ -273,12 +314,27 @@ def run_demo_with_lsl():
             if outlet:
                 try:
                     if lsl_sample is not None:
-                        # Send valid data: either (x, y, 0) or (0, 0, 1)
-                        outlet.push_sample(lsl_sample, local_clock())
-                        if lsl_sample[2] == 1.0:
-                            gaze_data_str = "Gaze: BLINK (0,0,1)"
+                        # FINAL VALIDATION: Absolutely ensure no invalid values are sent
+                        all_values_valid = True
+                        for val in lsl_sample:
+                            if not isinstance(val, (int, float)) or not np.isfinite(val) or abs(val) > 10.0:
+                                all_values_valid = False
+                                print(f"\nCRITICAL: Blocked invalid gaze sample from being sent: {lsl_sample}")
+                                break
+                        
+                        if all_values_valid:
+                            # Double-check range [0, 1] for x and y
+                            if not (0.0 <= lsl_sample[0] <= 1.0 and 0.0 <= lsl_sample[1] <= 1.0):
+                                print(f"\nCRITICAL: Gaze values out of range [0,1]: {lsl_sample}. Not sending.")
+                            else:
+                                # Send valid data: either (x, y, 0) or (0, 0, 1)
+                                outlet.push_sample(lsl_sample, local_clock())
+                                if lsl_sample[2] == 1.0:
+                                    gaze_data_str = "Gaze: BLINK (0,0,1)"
+                                else:
+                                    gaze_data_str = f"Gaze: x={lsl_sample[0]:.3f} y={lsl_sample[1]:.3f} (blink=0)"
                         else:
-                            gaze_data_str = f"Gaze: x={lsl_sample[0]:.3f} y={lsl_sample[1]:.3f} (blink=0)"
+                            gaze_data_str = "Gaze: BLOCKED (invalid values)"
                     else:
                         # Invalid data - skip sending
                         gaze_data_str = "Gaze: INVALID (not sent)"
@@ -287,12 +343,31 @@ def run_demo_with_lsl():
             
             if facemesh_outlet:
                 try:
-                    # Only push if facemesh data is valid (at least one landmark detected)
-                    if not np.isnan(facemesh_sample[0]):
-                        facemesh_outlet.push_sample(facemesh_sample, local_clock())
-                        # Count valid landmarks
-                        valid_count = sum(1 for i in range(0, 30, 3) if not np.isnan(facemesh_sample[i]))
-                        facemesh_data_str = f"FaceMesh: {valid_count}/10"
+                    # FINAL VALIDATION: Absolutely ensure no invalid values are sent
+                    all_valid = True
+                    for i, val in enumerate(facemesh_sample):
+                        if not isinstance(val, (int, float)) or not np.isfinite(val) or abs(val) > 100.0:
+                            all_valid = False
+                            print(f"\nCRITICAL: Blocked invalid FaceMesh sample at index {i}: {val}")
+                            break
+                    
+                    # Only push if facemesh data is valid
+                    if all_valid and not np.isnan(facemesh_sample[0]):
+                        # Additional range check for normalized values (x, y should be in [0, 1])
+                        range_valid = True
+                        for i in range(0, 30, 3):  # Check x and y coordinates
+                            if not (0.0 <= facemesh_sample[i] <= 1.0 and 0.0 <= facemesh_sample[i+1] <= 1.0):
+                                range_valid = False
+                                print(f"\nCRITICAL: FaceMesh coordinate out of range [0,1] at landmark {i//3}: x={facemesh_sample[i]}, y={facemesh_sample[i+1]}")
+                                break
+                        
+                        if range_valid:
+                            facemesh_outlet.push_sample(facemesh_sample, local_clock())
+                            # Count valid landmarks
+                            valid_count = sum(1 for i in range(0, 30, 3) if not np.isnan(facemesh_sample[i]))
+                            facemesh_data_str = f"FaceMesh: {valid_count}/10"
+                        else:
+                            facemesh_data_str = "FaceMesh: BLOCKED (out of range)"
                     else:
                         # Skip sending invalid data
                         facemesh_data_str = "FaceMesh: INVALID (not sent)"
