@@ -2,9 +2,16 @@
 
 A Unity-based remote expert collaboration system that enables real-time multi-user experiences with spatial alignment and eye gaze tracking capabilities. This client allows remote users (desktop/laptop) to view and interact with VR users' environments through networked 3D representations.
 
-## 🎯 Overview
-
-RemoteXR_Client is the remote expert/desktop component of a collaborative XR system. It connects to VR users (MeshVR) through Photon networking, displaying their scanned environments and enabling real-time interaction and guidance.
+## set up eye and face mesh tracking
+### Mac
+if you are using mac or equivalent(zsh or bash?),
+you can use run_demo.sh to run the demo to track eye-gaze and face mesh.
+```
+cd /path/to/remoteXR_client
+./run_demo.sh
+```
+### Windows
+if you are using windows, please install python and run the command below.
 
 ### Key Features
 
@@ -105,177 +112,13 @@ To change the room name, edit the `OnConnectedToMaster()` method in `RemoteClien
 ```csharp
 PhotonNetwork.JoinOrCreateRoom("YourRoomName", new RoomOptions { MaxPlayers = 4 }, TypedLobby.Default);
 ```
-
-#### Alignment Configuration
-Edit `SpatialAlignmentManager` settings in Unity Inspector:
-- **Mesh Reference Point**: Transform representing the mesh's origin
-- **Alignment Mode**: Choose from AutoAlign, ManualAlign, MarkerBased, or SharedOrigin
-- **Show Debug Info**: Toggle on-screen alignment data display
-
-## 🎮 Controls
-
-### Remote Client (Desktop) - Free-Fly Camera
-
-| Input | Action |
-|-------|--------|
-| `W` / `S` | Move forward / backward |
-| `A` / `D` | Move left / right |
-| `E` / `Q` | Move up / down |
-| `Right Mouse Button` + Mouse Move | Look around |
-| `Shift` (hold) | Increase movement speed (3x) |
-| `Ctrl` (hold) | Decrease movement speed (0.3x) |
-
-### Mesh Alignment Tool (VR Users)
-
-| Input | Action |
-|-------|--------|
-| `M` | Toggle alignment mode on/off |
-| `Numpad 8/2/4/6` or Arrow Keys | Move mesh (Forward/Back/Left/Right) |
-| `Page Up` / `Page Down` | Move mesh up/down |
-| `Numpad 9` / `Numpad 3` | Move mesh up/down (alternative) |
-| `Ctrl` + Numpad | Rotate mesh |
-| `+` / `-` | Scale mesh up/down |
-| `F` | Toggle fine adjustment mode |
-| `Enter` | Save current alignment |
-| `Ctrl` + `R` | Reset to original position |
-| `Ctrl` + `L` | Load saved alignment |
-| `Esc` | Exit alignment mode |
-
-## 📡 Eye Tracking Integration
-
-### EyeTrax Setup
-
-This project integrates with [EyeTrax](https://github.com/ck-zhang/EyeTrax) for eye gaze streaming via LSL.
-
-1. **Install EyeTrax**
-   ```bash
-   git clone https://github.com/ck-zhang/eyetrax && cd eyetrax
-   
-   # editable install — pick one
-   python -m pip install -e .
-   # OR
-   pip install uv && uv sync
-   ```
-
-2. **Configure LSL Receiver**
-   - Add `LslGazeReceiver` component to a GameObject in your scene
-   - Set **Stream Name**: "EyeGaze"
-   - Set **Stream Type**: "Gaze"
-   - Set **Channel Count**: 3 (x, y, pupil)
-
-3. **Start Streaming**
-   - Run your eye tracking Python script
-   - Unity will automatically connect to the LSL stream
-   - View gaze data in the Unity Console
-
-## 🔧 Networking Architecture
-
-### Photon PUN 2 Setup
-
-**Important**: All networked prefabs MUST have:
-1. `PhotonView` component
-2. `PhotonTransformView` component (for position/rotation sync)
-3. Be placed in `Assets/Resources/` folder
-4. PhotonView must observe the PhotonTransformView
-
-### Data Synchronization
-
-- **Player Positions**: Synced via `PhotonTransformView` (automatic)
-- **Mesh Alignment**: Synced via RPC calls in `MeshAlignmentTool`
-- **Coordinate Transformation**: Managed by `SpatialAlignmentManager` RPC system
-
-### Network Flow
-
-```
-RemoteClient (Desktop)                    VR Client (MeshVR)
-       |                                         |
-       |-- Connect to Photon Master ----------->|
-       |                                         |
-       |<- Join/Create "MeshVRRoom" ----------->|
-       |                                         |
-       |-- Spawn LocalClientCube prefab ------->|
-       |<- See VR user's position/orientation --|
-       |                                         |
-       |<- Receive mesh alignment data ---------|
-       |                                         |
-       |-- Spatial alignment transform -------->|
-       |<------- Real-time position sync ------>|
+cd \path\to\remoteXR_client
+python -m venv .\venv
+.\venv\Scripts\activate
+pip install requirements.txt
+python lsl_server.py
 ```
 
-## 🐛 Troubleshooting
+Thank you.
 
-### Common Issues
-
-**1. PhotonNetwork.Instantiate() error**
-```
-PhotonNetwork.Instantiate() can only instantiate objects with a PhotonView component
-```
-**Solution**: Add `PhotonView` component to your prefab in `Assets/Resources/`
-
-**2. Players not visible**
-- Ensure both clients are in the same Photon room
-- Check that prefab is in `Resources` folder
-- Verify PhotonView is properly configured
-
-**3. Mesh misalignment**
-- Enter alignment mode (`M` key)
-- Manually adjust mesh position/rotation
-- Save alignment (`Enter` key)
-- Verify `SpatialAlignmentManager` is configured
-
-**4. LSL connection fails**
-- Check that EyeTrax or other LSL source is running
-- Verify stream name matches ("EyeGaze")
-- Check LSL library is properly imported
-
-**5. Network lag/stuttering**
-- Reduce `PhotonTransformView` send rate
-- Check internet connection stability
-- Consider changing Photon region in settings
-
-## 📁 Project Structure
-
-```
-Assets/
-├── RemoteClient.cs              # Main remote user controller
-├── NetworkedPlayer.cs           # Player representation & sync
-├── SpatialAlignmentManager.cs   # Coordinate system alignment
-├── MeshAlignmentTool.cs         # Interactive mesh calibration
-├── PhotonDebugUI.cs             # Debug overlay
-├── AlignmentCalibrationTool.cs  # Calibration utilities
-├── Resources/                   # Photon instantiable prefabs
-│   └── LocalClientCube.prefab   # Player representation
-├── Scenes/
-│   ├── LslGazeReceiver.cs      # Eye tracking integration
-│   └── [Scene files]
-├── Photon/                      # Photon Unity Networking
-└── Settings/                    # Unity project settings
-```
-
-## 🤝 Related Projects
-
-This client works in conjunction with:
-- **MeshVR** - The VR client component (HoloLens 2/Quest)
-- **EyeTrax** - Eye tracking data streaming ([GitHub](https://github.com/ck-zhang/EyeTrax))
-
-## 📄 License
-
-See [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **Photon Unity Networking** by Exit Games
-- **EyeTrax** by ck-zhang
-- **Lab Streaming Layer** by SCCN
-
-## 📧 Support
-
-For issues, questions, or contributions:
-- Open an issue on GitHub
-- Contact: [prasanthsasikumar](https://github.com/prasanthsasikumar)
-
----
-
-**Status**: Active Development  
-**Unity Version**: 2021.3 LTS+  
-**Platform**: Windows / macOS (Desktop)
+https://github.com/ck-zhang/EyeTrax
