@@ -31,7 +31,16 @@ public class LslGazeReceiver : MonoBehaviour
     private double _lastTimestamp;
     private float _logTimer;
 
+    // Cached gaze data for external access
+    private Vector2 _gazePosition2D;
+    private float _pupilSize;
+
     public bool IsConnected => _inlet != null;
+    
+    // Public accessors for gaze data
+    public Vector2 GazePosition2D => _gazePosition2D;
+    public float PupilSize => _pupilSize;
+    public double LastTimestamp => _lastTimestamp;
 
     private void Start()
     {
@@ -84,6 +93,12 @@ public class LslGazeReceiver : MonoBehaviour
                 // Clear the sample and skip processing
                 System.Array.Clear(_sample, 0, _sample.Length);
                 ts = 0.0;
+            }
+            else
+            {
+                // Cache valid gaze data for external access
+                _gazePosition2D = new Vector2(_sample[0], _sample[1]);
+                _pupilSize = _sample[2];
             }
         }
         catch (System.Exception ex)
