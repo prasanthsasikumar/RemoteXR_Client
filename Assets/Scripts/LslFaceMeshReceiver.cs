@@ -157,21 +157,23 @@ public class LslFaceMeshReceiver : MonoBehaviour
         if (ts != 0.0)
         {
             _lastTimestamp = ts;
-            if (logEveryFrame)
-            {
-                LogSample(ts);
-            }
+            // Logging disabled to prevent crashes on macOS ARM64
+            // if (logEveryFrame)
+            // {
+            //     LogSample(ts);
+            // }
         }
 
-        if (!logEveryFrame && _lastTimestamp != 0.0)
-        {
-            _logTimer += Time.deltaTime;
-            if (_logTimer >= logInterval)
-            {
-                _logTimer = 0f;
-                LogSample(_lastTimestamp);
-            }
-        }
+        // Logging disabled to prevent crashes on macOS ARM64
+        // if (!logEveryFrame && _lastTimestamp != 0.0)
+        // {
+        //     _logTimer += Time.deltaTime;
+        //     if (_logTimer >= logInterval)
+        //     {
+        //         _logTimer = 0f;
+        //         LogSample(_lastTimestamp);
+        //     }
+        // }
     }
 
     private void LogSample(double ts)
