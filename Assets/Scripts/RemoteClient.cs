@@ -4,6 +4,10 @@ using Photon.Realtime;
 
 public class RemoteClient : MonoBehaviourPunCallbacks
 {
+    [Header("Client Type")]
+    [Tooltip("If true, instantiates player and transmits data (Remote/AR device). If false, only observes (Local/Desktop).")]
+    public bool isTransmitter = true;
+    
     [Header("Fly Camera Settings")]
     public float moveSpeed = 5f;
     public float fastMultiplier = 3f;
@@ -54,13 +58,60 @@ public class RemoteClient : MonoBehaviourPunCallbacks
         Debug.Log("RemoteClient joined room: " + PhotonNetwork.CurrentRoom.Name);
         Debug.Log("Players in room: " + PhotonNetwork.CurrentRoom.PlayerCount);
 
-        // Instantiate player representation
-        // Spawn at a different location to avoid overlap
-        Vector3 spawnPos = new Vector3(Random.Range(-2f, 2f), 1.5f, Random.Range(-2f, 2f));
-        remotePlayerRepresentation = PhotonNetwork.Instantiate("LocalClientCube", spawnPos, Quaternion.identity);
-        remotePlayerRepresentation.name = "RemotePlayer_" + PhotonNetwork.NickName;
+        // Only instantiate player if this is a transmitter (remote client)
+        if (isTransmitter)
+        {
+            // Instantiate player representation
+            // Spawn at a different location to avoid overlap
+            Vector3 spawnPos = new Vector3(Random.Range(-2f, 2f), 1.5f, Random.Range(-2f, 2f));
+            remotePlayerRepresentation = PhotonNetwork.Instantiate("LocalClientCube", spawnPos, Quaternion.identity);
+            remotePlayerRepresentation.name = "RemotePlayer_" + PhotonNetwork.NickName;
+            
+            remotePosition = spawnPos;
+            
+            // Set up face and gaze transmission
+            SetupFaceGazeTransmission();
+            
+            Debug.Log("Transmitter mode: Player instantiated and LSL setup initiated");
+        }
+        else
+        {
+            Debug.Log("Receiver mode: NOT instantiating player - will observe remote players only");
+        }
+    }
+    
+    private void SetupFaceGazeTransmission()
+    {
+        if (remotePlayerRepresentation == null)
+            return;
         
-        remotePosition = spawnPos;
+        // Add LSL receivers for face and gaze data
+        LslFaceMeshReceiver faceMeshReceiver = remotePlayerRepresentation.GetComponent<LslFaceMeshReceiver>();
+        if (faceMeshReceiver == null)
+        {
+            faceMeshReceiver = remotePlayerRepresentation.AddComponent<LslFaceMeshReceiver>();
+            Debug.Log("Added LslFaceMeshReceiver to remote player");
+        }
+        
+        LslGazeReceiver gazeReceiver = remotePlayerRepresentation.GetComponent<LslGazeReceiver>();
+        if (gazeReceiver == null)
+        {
+            gazeReceiver = remotePlayerRepresentation.AddComponent<LslGazeReceiver>();
+            Debug.Log("Added LslGazeReceiver to remote player");
+        }
+        
+        // Add Photon transmitter
+        PhotonFaceGazeTransmitter transmitter = remotePlayerRepresentation.GetComponent<PhotonFaceGazeTransmitter>();
+        if (transmitter == null)
+        {
+            transmitter = remotePlayerRepresentation.AddComponent<PhotonFaceGazeTransmitter>();
+            transmitter.faceMeshReceiver = faceMeshReceiver;
+            transmitter.gazeReceiver = gazeReceiver;
+            transmitter.transmissionInterval = 2; // Send every 2 frames for bandwidth efficiency
+            transmitter.transmitFaceMesh = true;
+            transmitter.transmitGaze = true;
+            Debug.Log("Added PhotonFaceGazeTransmitter to remote player");
+        }
     }
 
     void Update()
